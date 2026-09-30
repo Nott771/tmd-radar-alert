@@ -25,16 +25,33 @@ BOX_COLOR = {"yellow": (0, 255, 255), "orange": (0, 165, 255), "red": (0, 0, 255
 
 
 def fetch_image():
-    if not RADAR_URL:
-        raise ValueError("RADAR_URL secret is missing or empty!")
+    if not RADAR_URL or "http" not in RADAR_URL:
+        raise ValueError("RADAR_URL is invalid or missing in GitHub Secrets!")
     
-    r = requests.get(RADAR_URL, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    r = requests.get(RADAR_URL, timeout=30, headers=headers)
     r.raise_for_status()
+
+    # ตรวจสอบว่า URL ที่ดึงมาเป็นรูปภาพหรือไม่
+    content_type = r.headers.get("Content-Type", "")
+    if "text/html" in content_type:
+        raise ValueError(f"RADAR_URL points to a Webpage (HTML), not an Image file! URL used: {RADAR_URL}")
+
+    # ลอง decode ด้วย OpenCV
     img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR)
+    
+    # ถ้า OpenCV อ่านไม่ได้ ลองเปิดด้วย PIL (กรณีเป็น GIF Animation)
     if img is None:
-        from PIL import Image
-        import io
-        img = cv2.cvtColor(np.array(Image.open(io.BytesIO(r.content)).convert("RGB")), cv2.COLOR_RGB2BGR)
+        try:
+            from PIL import Image
+            import io
+            pil_img = Image.open(io.BytesIO(r.content)).convert("RGB")
+            img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        except Exception as e:
+            raise ValueError(f"Could not decode image from RADAR_URL. Make sure it's a direct link to .png/.jpg/.gif! Error: {e}")
+
     return img
 
 
