@@ -1,26 +1,20 @@
-"""
-TMD radar -> detect yellow/orange/red (rain) -> alert via LINE Messaging API
-pip install requests opencv-python numpy
-รันทุก 10 นาทีด้วย cron / Task Scheduler / GitHub Actions
-"""
 import os, time, base64, json
 import requests, cv2, numpy as np
 
 # ---------------- CONFIG ----------------
-RADAR_URL = os.getenv("RADAR_URL", "PUT_TMD_RADAR_IMAGE_URL_HERE")  # ดู URL จากหน้าเรดาร์ TMD (F12 > Network > Img)
-LINE_TOKEN = os.getenv("LINE_TOKEN", "")      # Channel access token (long-lived)
-LINE_TO = os.getenv("LINE_TO", "")            # userId หรือ groupId
-IMGBB_KEY = os.getenv("IMGBB_KEY", "")        # https://api.imgbb.com/
+RADAR_URL = os.getenv("RADAR_URL", "")
+LINE_TOKEN = os.getenv("LINE_TOKEN", "")
+MY_LINE_USER_ID = os.getenv("MY_LINE_USER_ID", "")
+IMGBB_KEY = os.getenv("IMGBB_KEY", "")
 
-# พื้นที่ที่สนใจ (พิกเซล x1,y1,x2,y2 ของรูปเรดาร์) -> ปรับให้ครอบชลบุรี/บางละมุง
-# ตั้ง None = ตรวจทั้งรูป
+# พื้นที่ที่สนใจ (พิกเซล x1,y1,x2,y2 ของรูปเรดาร์) -> ตั้ง None = ตรวจทั้งรูป
 ROI = None  # เช่น (420, 380, 560, 520)
 
-MIN_PIXELS = 150          # กี่พิกเซลถึงจะแจ้งเตือน (ปรับตามขนาดรูป)
+MIN_PIXELS = 150          # กี่พิกเซลถึงจะแจ้งเตือน
 COOLDOWN_SEC = 30 * 60    # แจ้งซ้ำได้ทุกกี่วินาที
 STATE_FILE = "last_alert.json"
 
-# ช่วงสี HSV (OpenCV: H 0-179) — ต้องจูนกับ legend จริงของ TMD
+# ช่วงสี HSV (OpenCV: H 0-179)
 RANGES = {
     "yellow": [((20, 120, 150), (35, 255, 255))],
     "orange": [((10, 120, 150), (19, 255, 255))],
@@ -31,10 +25,13 @@ BOX_COLOR = {"yellow": (0, 255, 255), "orange": (0, 165, 255), "red": (0, 0, 255
 
 
 def fetch_image():
+    if not RADAR_URL:
+        raise ValueError("RADAR_URL secret is missing or empty!")
+    
     r = requests.get(RADAR_URL, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
     img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR)
-    if img is None:  # เผื่อเป็น GIF
+    if img is None:
         from PIL import Image
         import io
         img = cv2.cvtColor(np.array(Image.open(io.BytesIO(r.content)).convert("RGB")), cv2.COLOR_RGB2BGR)
@@ -56,7 +53,7 @@ def detect(img):
         m = np.zeros(img.shape[:2], np.uint8)
         for lo, hi in rngs:
             m |= cv2.inRange(hsv, np.array(lo), np.array(hi))
-        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel)  # ตัด noise เส้นแผนที่/ตัวอักษร
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel)
         m &= roi_mask
         result[name] = int(cv2.countNonZero(m))
         cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -70,6 +67,8 @@ def detect(img):
 
 
 def upload_imgbb(img):
+    if not IMGBB_KEY:
+        raise ValueError("IMGBB_KEY secret is missing!")
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
     r = requests.post(
         "https://api.imgbb.com/1/upload",
@@ -81,13 +80,15 @@ def upload_imgbb(img):
 
 
 def line_push(text, image_url=None):
+    if not LINE_TOKEN or not MY_LINE_USER_ID:
+        raise ValueError("LINE_TOKEN or MY_LINE_USER_ID secret is missing!")
     msgs = [{"type": "text", "text": text}]
     if image_url:
         msgs.append({"type": "image", "originalContentUrl": image_url, "previewImageUrl": image_url})
     r = requests.post(
         "https://api.line.me/v2/bot/message/push",
         headers={"Authorization": f"Bearer {LINE_TOKEN}"},
-        json={"to": LINE_TO, "messages": msgs},
+        json={"to": MY_LINE_USER_ID, "messages": msgs},
         timeout=30,
     )
     r.raise_for_status()
@@ -95,25 +96,31 @@ def line_push(text, image_url=None):
 
 def in_cooldown():
     try:
-        return time.time() - json.load(open(STATE_FILE))["t"] < COOLDOWN_SEC
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                return time.time() - json.load(f)["t"] < COOLDOWN_SEC
     except Exception:
-        return False
+        pass
+    return False
 
 
 def main():
     img = fetch_image()
     counts, annotated = detect(img)
     strong = counts["yellow"] + counts["orange"] + counts["red"]
-    print(counts)
+    print(f"Detected pixels: {counts}")
 
     if strong < MIN_PIXELS or in_cooldown():
+        print("No significant rain detected or in cooldown.")
         return
 
     level = "🔴 ฝนหนักมาก" if counts["red"] >= MIN_PIXELS // 3 else "🟠 ฝนหนัก" if counts["orange"] else "🟡 ฝนปานกลาง"
     text = (f"{level} ตรวจพบกลุ่มฝนในพื้นที่เรดาร์\n"
             f"เหลือง {counts['yellow']} | ส้ม {counts['orange']} | แดง {counts['red']} px")
     line_push(text, upload_imgbb(annotated))
-    json.dump({"t": time.time()}, open(STATE_FILE, "w"))
+    
+    with open(STATE_FILE, "w") as f:
+        json.dump({"t": time.time()}, f)
 
 
 if __name__ == "__main__":
