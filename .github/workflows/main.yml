@@ -2,8 +2,8 @@ name: TMD Radar Auto Alert
 
 on:
   schedule:
-    # รันทุก 10 นาที (เวลา UTC)
-    - cron: '*/10 * * * *'
+    # รันทุก 15 นาที (เวลา UTC)
+    - cron: '*/15 * * * *'
   workflow_dispatch: # ปุ่มสำหรับกดสั่งรันด้วยตัวเองเพื่อทดสอบ
 
 jobs:
