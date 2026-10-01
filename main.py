@@ -165,14 +165,12 @@ def main():
     strong = counts["yellow"] + counts["orange"] + counts["red"]
     print(f"Detected pixels: {counts}")
 
-    # ถ้าไม่ใช่โหมดเทส และพิกเซลฝนไม่ถึงเกณฑ์ หรืออยู่ใน Cooldown ให้จบการทำงาน
     if not TEST_MODE and (strong < MIN_PIXELS or in_cooldown()):
         print("No significant rain detected or in cooldown.")
         return
 
-    # ประเมินระดับความรุนแรงตามพิกเซลจริง
     if TEST_MODE and strong == 0:
-        level = "🧪 [TEST] ทดสอบระบบ (ไม่พบกลุ่มฝนสีเหลือง/ส้ม/แดง)"
+        level = "🧪 [TEST] ทดสอบระบบ (ไม่พบกลุ่มฝน)"
     elif counts["red"] >= MIN_PIXELS // 3:
         level = "🔴 ฝนหนักมาก"
     elif counts["orange"] > 0:
@@ -184,9 +182,13 @@ def main():
 
     text = (f"{level} ในพื้นที่เรดาร์\n"
             f"เหลือง {counts['yellow']} | ส้ม {counts['orange']} | แดง {counts['red']} px")
-    
+
     line_push(text, upload_imgbb(annotated))
-    
+
     if not TEST_MODE:
         with open(STATE_FILE, "w") as f:
             json.dump({"t": time.time()}, f)
+
+
+if __name__ == "__main__":
+    main()
