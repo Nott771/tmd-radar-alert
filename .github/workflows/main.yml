@@ -2,20 +2,19 @@ name: TMD Radar Auto Alert
 
 on:
   schedule:
-    # รันทุก 15 นาที (เวลา UTC)
-    - cron: '*/15 * * * *'
-  workflow_dispatch: # ปุ่มสำหรับกดสั่งรันด้วยตัวเองเพื่อทดสอบ
+    - cron: '*/18 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-radar-script:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
@@ -24,10 +23,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests opencv-python-headless numpy pillow
 
+      - name: Restore cooldown state
+        uses: actions/cache@v4
+        with:
+          path: last_alert.json
+          key: radar-state-${{ github.run_id }}
+          restore-keys: radar-state-
+
       - name: Run TMD Radar Script
         env:
           RADAR_URL: ${{ secrets.RADAR_URL }}
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
-          LINE_TO: ${{ secrets.LINE_TO }}
+          MY_LINE_USER_ID: ${{ secrets.MY_LINE_USER_ID }}
           IMGBB_KEY: ${{ secrets.IMGBB_KEY }}
+          TEST_MODE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
         run: python main.py
