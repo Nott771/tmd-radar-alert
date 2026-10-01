@@ -1,4 +1,4 @@
-import os, time, base64, json
+import os, time, base64, json, traceback
 import requests, cv2, numpy as np
 
 # ---------------- CONFIG ----------------
@@ -7,14 +7,12 @@ LINE_TOKEN = os.getenv("LINE_TOKEN", "")
 MY_LINE_USER_ID = os.getenv("MY_LINE_USER_ID", "")
 IMGBB_KEY = os.getenv("IMGBB_KEY", "")
 
-# พื้นที่ที่สนใจ (พิกเซล x1,y1,x2,y2 ของรูปเรดาร์)(ขยับ x1 เป็น 60 พิกเซลขึ้นไป เพื่อหลบแถบสีซ้ายสุด)
 ROI = (738, 626, 1730, 1580)
 
-MIN_PIXELS = 150          # กี่พิกเซลถึงจะแจ้งเตือน
-COOLDOWN_SEC = 30 * 60    # แจ้งซ้ำได้ทุกกี่วินาที
+MIN_PIXELS = 150
+COOLDOWN_SEC = 30 * 60
 STATE_FILE = "last_alert.json"
 
-# ช่วงสี HSV (OpenCV: H 0-179)
 RANGES = {
     "yellow": [((20, 120, 150), (35, 255, 255))],
     "orange": [((10, 120, 150), (19, 255, 255))],
@@ -27,22 +25,19 @@ BOX_COLOR = {"yellow": (0, 255, 255), "orange": (0, 165, 255), "red": (0, 0, 255
 def fetch_image():
     if not RADAR_URL or "http" not in RADAR_URL:
         raise ValueError("RADAR_URL is invalid or missing in GitHub Secrets!")
-    
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     r = requests.get(RADAR_URL, timeout=30, headers=headers)
     r.raise_for_status()
 
-    # ตรวจสอบว่า URL ที่ดึงมาเป็นรูปภาพหรือไม่
     content_type = r.headers.get("Content-Type", "")
     if "text/html" in content_type:
         raise ValueError(f"RADAR_URL points to a Webpage (HTML), not an Image file! URL used: {RADAR_URL}")
 
-    # ลอง decode ด้วย OpenCV
     img = cv2.imdecode(np.frombuffer(r.content, np.uint8), cv2.IMREAD_COLOR)
-    
-    # ถ้า OpenCV อ่านไม่ได้ ลองเปิดด้วย PIL (กรณีเป็น GIF Animation)
+
     if img is None:
         try:
             from PIL import Image
@@ -50,7 +45,7 @@ def fetch_image():
             pil_img = Image.open(io.BytesIO(r.content)).convert("RGB")
             img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
         except Exception as e:
-            raise ValueError(f"Could not decode image from RADAR_URL. Make sure it's a direct link to .png/.jpg/.gif! Error: {e}")
+            raise ValueError(f"Could not decode image from RADAR_URL. Error: {e}")
 
     return img
 
@@ -58,15 +53,10 @@ def fetch_image():
 def detect(img):
     clean_img = img.copy()
     h, w = clean_img.shape[:2]
-    
-    # 1. ถมดำตัดแถบสเกลสีและตัวเลขด้านซ้ายสุดออก (ความกว้าง 65 px)
+
     clean_img[:, 0:65] = (0, 0, 0)
-    
-    # 2. ถมดำตัดโลโก้กรมอุตุฯ มุมบนซ้ายออก (กว้าง 130px, สูง 130px)
     clean_img[0:130, 0:130] = (0, 0, 0)
-    
-    # 3. ถมดำตัดกล่องข้อความขวาล่างออก
-    clean_img[int(h*0.85):h, int(w*0.75):w] = (0, 0, 0)
+    clean_img[int(h * 0.85):h, int(w * 0.75):w] = (0, 0, 0)
 
     hsv = cv2.cvtColor(clean_img, cv2.COLOR_BGR2HSV)
     roi_mask = np.zeros(img.shape[:2], np.uint8)
@@ -90,16 +80,16 @@ def detect(img):
             if cv2.contourArea(c) >= 20:
                 x, y, w_box, h_box = cv2.boundingRect(c)
                 cv2.rectangle(out, (x, y), (x + w_box, y + h_box), BOX_COLOR[name], 2)
-                
+
     if ROI:
         cv2.rectangle(out, (ROI[0], ROI[1]), (ROI[2], ROI[3]), (255, 0, 0), 2)
     return result, out
+
 
 def upload_imgbb(img):
     if not IMGBB_KEY:
         raise ValueError("IMGBB_KEY secret is missing!")
 
-    # ย่อรูปถ้าใหญ่เกินไป (ด้านยาวสุด 1600px) ลดโอกาสโดนปฏิเสธ
     h, w = img.shape[:2]
     scale = 1600 / max(h, w)
     if scale < 1:
@@ -132,7 +122,8 @@ def line_push(text, image_url=None):
         json={"to": MY_LINE_USER_ID, "messages": msgs},
         timeout=30,
     )
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"LINE {r.status_code}: {r.text[:300]}")
 
 
 def in_cooldown():
@@ -145,28 +136,12 @@ def in_cooldown():
     return False
 
 
-def main():
-    img = fetch_image()
-    counts, annotated = detect(img)
-    strong = counts["yellow"] + counts["orange"] + counts["red"]
-    print(f"Detected pixels: {counts}")
-
-    if strong < MIN_PIXELS or in_cooldown():
-        print("No significant rain detected or in cooldown.")
-        return
-
-    level = "🔴 ฝนหนักมาก" if counts["red"] >= MIN_PIXELS // 3 else "🟠 ฝนหนัก" if counts["orange"] else "🟡 ฝนปานกลาง"
-    text = (f"{level} ตรวจพบกลุ่มฝนในพื้นที่เรดาร์\n"
-            f"เหลือง {counts['yellow']} | ส้ม {counts['orange']} | แดง {counts['red']} px")
-    line_push(text, upload_imgbb(annotated))
-    
-    with open(STATE_FILE, "w") as f:
-        json.dump({"t": time.time()}, f)
-
-
-if __name__ == "__main__":
-    main()
-
+def notify_error(err):
+    try:
+        msg = f"⚠️ TMD Radar Alert ผิดพลาด\n{type(err).__name__}: {str(err)[:400]}"
+        line_push(msg)
+    except Exception as e2:
+        print(f"Could not send error notification: {e2}")
 
 
 def main():
@@ -195,33 +170,18 @@ def main():
     text = (f"{level} ในพื้นที่เรดาร์\n"
             f"เหลือง {counts['yellow']} | ส้ม {counts['orange']} | แดง {counts['red']} px")
 
-        try:
+    try:
         image_url = upload_imgbb(annotated)
     except Exception as e:
         print(f"Image upload failed: {e}")
         image_url = None
         text += "\n(อัปโหลดรูปไม่สำเร็จ)"
+
     line_push(text, image_url)
 
     if not TEST_MODE:
         with open(STATE_FILE, "w") as f:
             json.dump({"t": time.time()}, f)
-
-
-if __name__ == "__main__":
-    main()
-
-
-import traceback
-
-
-def notify_error(err):
-    """ส่งข้อความ error เข้า LINE (ห้ามให้ตัวมันเองทำให้ล้มซ้ำ)"""
-    try:
-        msg = f"⚠️ TMD Radar Alert ผิดพลาด\n{type(err).__name__}: {str(err)[:400]}"
-        line_push(msg)
-    except Exception as e2:
-        print(f"Could not send error notification: {e2}")
 
 
 if __name__ == "__main__":
