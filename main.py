@@ -86,7 +86,7 @@ def detect(img):
     return result, out
 
 
-def upload_imgbb(img):
+def upload_imgbb(img, max_retries=3):
     if not IMGBB_KEY:
         raise ValueError("IMGBB_KEY secret is missing!")
 
@@ -99,15 +99,37 @@ def upload_imgbb(img):
     if not ok:
         raise ValueError("Failed to encode image")
 
-    r = requests.post(
-        "https://api.imgbb.com/1/upload",
-        params={"key": IMGBB_KEY},
-        data={"image": base64.b64encode(buf).decode(), "expiration": 86400},
-        timeout=60,
-    )
-    if not r.ok:
-        raise RuntimeError(f"imgbb {r.status_code}: {r.text[:300]}")
-    return r.json()["data"]["url"]
+    payload = {
+        "image": base64.b64encode(buf).decode(),
+        "expiration": 86400
+    }
+
+    # เพิ่มระบบพยายามส่งซ้ำ (Retry) สูงสุด 3 ครั้งหากเจอเน็ตหลุดหรือ Timeout
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"Uploading image to ImgBB (Attempt {attempt}/{max_retries})...")
+            r = requests.post(
+                "https://api.imgbb.com/1/upload",
+                params={"key": IMGBB_KEY},
+                data=payload,
+                timeout=60,
+            )
+            if r.ok:
+                res_json = r.json()
+                if res_json.get("success"):
+                    url = res_json["data"]["url"]
+                    print(f"ImgBB Upload Success: {url}")
+                    return url
+            last_err = f"imgbb {r.status_code}: {r.text[:300]}"
+        except Exception as e:
+            last_err = str(e)
+            print(f"ImgBB upload attempt {attempt} failed: {e}")
+        
+        if attempt < max_retries:
+            time.sleep(5)  # หน่วงเวลา 5 วินาทีก่อนลองใหม่อีกครั้ง
+
+    raise RuntimeError(f"All ImgBB retries failed. Last error: {last_err}")
 
 
 def line_push(text, image_url=None):
