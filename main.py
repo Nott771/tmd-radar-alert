@@ -158,7 +158,6 @@ if __name__ == "__main__":
 
 
 def main():
-    # ตรวจสอบว่าเป็นการสั่งรันแบบบังคับเทสหรือไม่
     TEST_MODE = os.getenv("TEST_MODE", "false").lower() == "true"
 
     img = fetch_image()
@@ -166,15 +165,24 @@ def main():
     strong = counts["yellow"] + counts["orange"] + counts["red"]
     print(f"Detected pixels: {counts}")
 
-    # ถ้าอยู่ใน TEST_MODE จะข้ามการเช็กจำนวนฝนและ cooldown ทันที
+    # ถ้าไม่ใช่โหมดเทส และพิกเซลฝนไม่ถึงเกณฑ์ หรืออยู่ใน Cooldown ให้จบการทำงาน
     if not TEST_MODE and (strong < MIN_PIXELS or in_cooldown()):
         print("No significant rain detected or in cooldown.")
         return
 
-    level = "🧪 [TEST] ทดสอบระบบแจ้งเตือน" if TEST_MODE else (
-        "🔴 ฝนหนักมาก" if counts["red"] >= MIN_PIXELS // 3 else "🟠 ฝนหนัก" if counts["orange"] else "🟡 ฝนปานกลาง"
-    )
-    text = (f"{level}\n"
+    # ประเมินระดับความรุนแรงตามพิกเซลจริง
+    if TEST_MODE and strong == 0:
+        level = "🧪 [TEST] ทดสอบระบบ (ไม่พบกลุ่มฝนสีเหลือง/ส้ม/แดง)"
+    elif counts["red"] >= MIN_PIXELS // 3:
+        level = "🔴 ฝนหนักมาก"
+    elif counts["orange"] > 0:
+        level = "🟠 ฝนหนัก"
+    elif counts["yellow"] > 0:
+        level = "🟡 ฝนปานกลาง"
+    else:
+        level = "🟢 ฝนตกเล็กน้อย / ปกติ"
+
+    text = (f"{level} ในพื้นที่เรดาร์\n"
             f"เหลือง {counts['yellow']} | ส้ม {counts['orange']} | แดง {counts['red']} px")
     
     line_push(text, upload_imgbb(annotated))
