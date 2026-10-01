@@ -98,13 +98,25 @@ def detect(img):
 def upload_imgbb(img):
     if not IMGBB_KEY:
         raise ValueError("IMGBB_KEY secret is missing!")
-    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+    # ย่อรูปถ้าใหญ่เกินไป (ด้านยาวสุด 1600px) ลดโอกาสโดนปฏิเสธ
+    h, w = img.shape[:2]
+    scale = 1600 / max(h, w)
+    if scale < 1:
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        raise ValueError("Failed to encode image")
+
     r = requests.post(
         "https://api.imgbb.com/1/upload",
-        data={"key": IMGBB_KEY, "image": base64.b64encode(buf).decode(), "expiration": 86400},
+        params={"key": IMGBB_KEY},
+        data={"image": base64.b64encode(buf).decode(), "expiration": 86400},
         timeout=60,
     )
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"imgbb {r.status_code}: {r.text[:300]}")
     return r.json()["data"]["url"]
 
 
@@ -183,7 +195,13 @@ def main():
     text = (f"{level} ในพื้นที่เรดาร์\n"
             f"เหลือง {counts['yellow']} | ส้ม {counts['orange']} | แดง {counts['red']} px")
 
-    line_push(text, upload_imgbb(annotated))
+        try:
+        image_url = upload_imgbb(annotated)
+    except Exception as e:
+        print(f"Image upload failed: {e}")
+        image_url = None
+        text += "\n(อัปโหลดรูปไม่สำเร็จ)"
+    line_push(text, image_url)
 
     if not TEST_MODE:
         with open(STATE_FILE, "w") as f:
@@ -192,3 +210,24 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+import traceback
+
+
+def notify_error(err):
+    """ส่งข้อความ error เข้า LINE (ห้ามให้ตัวมันเองทำให้ล้มซ้ำ)"""
+    try:
+        msg = f"⚠️ TMD Radar Alert ผิดพลาด\n{type(err).__name__}: {str(err)[:400]}"
+        line_push(msg)
+    except Exception as e2:
+        print(f"Could not send error notification: {e2}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        traceback.print_exc()
+        notify_error(e)
+        raise
