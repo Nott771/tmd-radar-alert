@@ -56,7 +56,19 @@ def fetch_image():
 
 
 def detect(img):
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    clean_img = img.copy()
+    h, w = clean_img.shape[:2]
+    
+    # 1. ถมดำตัดแถบสเกลสีและตัวเลขด้านซ้ายสุดออก (ความกว้าง 65 px)
+    clean_img[:, 0:65] = (0, 0, 0)
+    
+    # 2. ถมดำตัดโลโก้กรมอุตุฯ มุมบนซ้ายออก (กว้าง 130px, สูง 130px)
+    clean_img[0:130, 0:130] = (0, 0, 0)
+    
+    # 3. ถมดำตัดกล่องข้อความขวาล่างออก
+    clean_img[int(h*0.85):h, int(w*0.75):w] = (0, 0, 0)
+
+    hsv = cv2.cvtColor(clean_img, cv2.COLOR_BGR2HSV)
     roi_mask = np.zeros(img.shape[:2], np.uint8)
     if ROI:
         x1, y1, x2, y2 = ROI
@@ -76,12 +88,12 @@ def detect(img):
         cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for c in cnts:
             if cv2.contourArea(c) >= 20:
-                x, y, w, h = cv2.boundingRect(c)
-                cv2.rectangle(out, (x, y), (x + w, y + h), BOX_COLOR[name], 2)
+                x, y, w_box, h_box = cv2.boundingRect(c)
+                cv2.rectangle(out, (x, y), (x + w_box, y + h_box), BOX_COLOR[name], 2)
+                
     if ROI:
         cv2.rectangle(out, (ROI[0], ROI[1]), (ROI[2], ROI[3]), (255, 0, 0), 2)
     return result, out
-
 
 def upload_imgbb(img):
     if not IMGBB_KEY:
