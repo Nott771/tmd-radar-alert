@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,5 +29,5 @@ jobs:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
           MY_LINE_USER_ID: ${{ secrets.MY_LINE_USER_ID }}
           IMGBB_KEY: ${{ secrets.IMGBB_KEY }}
-          TEST_MODE: "true" #
+          TEST_MODE: "true" 
         run: python main.py
