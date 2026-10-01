@@ -10,7 +10,7 @@ IMGBB_KEY = os.getenv("IMGBB_KEY", "")
 # พื้นที่ที่สนใจ (พิกเซล x1,y1,x2,y2 ของรูปเรดาร์)(ขยับ x1 เป็น 60 พิกเซลขึ้นไป เพื่อหลบแถบสีซ้ายสุด)
 ROI = (870, 701, 1730, 1580)
 
-MIN_PIXELS = 0          # กี่พิกเซลถึงจะแจ้งเตือน
+MIN_PIXELS = 150          # กี่พิกเซลถึงจะแจ้งเตือน
 COOLDOWN_SEC = 30 * 60    # แจ้งซ้ำได้ทุกกี่วินาที
 STATE_FILE = "last_alert.json"
 
@@ -154,3 +154,31 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+def main():
+    # ตรวจสอบว่าเป็นการสั่งรันแบบบังคับเทสหรือไม่
+    TEST_MODE = os.getenv("TEST_MODE", "false").lower() == "true"
+
+    img = fetch_image()
+    counts, annotated = detect(img)
+    strong = counts["yellow"] + counts["orange"] + counts["red"]
+    print(f"Detected pixels: {counts}")
+
+    # ถ้าอยู่ใน TEST_MODE จะข้ามการเช็กจำนวนฝนและ cooldown ทันที
+    if not TEST_MODE and (strong < MIN_PIXELS or in_cooldown()):
+        print("No significant rain detected or in cooldown.")
+        return
+
+    level = "🧪 [TEST] ทดสอบระบบแจ้งเตือน" if TEST_MODE else (
+        "🔴 ฝนหนักมาก" if counts["red"] >= MIN_PIXELS // 3 else "🟠 ฝนหนัก" if counts["orange"] else "🟡 ฝนปานกลาง"
+    )
+    text = (f"{level}\n"
+            f"เหลือง {counts['yellow']} | ส้ม {counts['orange']} | แดง {counts['red']} px")
+    
+    line_push(text, upload_imgbb(annotated))
+    
+    if not TEST_MODE:
+        with open(STATE_FILE, "w") as f:
+            json.dump({"t": time.time()}, f)
