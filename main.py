@@ -8,9 +8,9 @@ MY_LINE_USER_ID = os.getenv("MY_LINE_USER_ID", "")
 IMGBB_KEY = os.getenv("IMGBB_KEY", "")
 
 # พื้นที่ที่สนใจ (พิกเซล x1,y1,x2,y2 ของรูปเรดาร์)(ขยับ x1 เป็น 60 พิกเซลขึ้นไป เพื่อหลบแถบสีซ้ายสุด)
-ROI = (870, 701, 1730, 1580)
+ROI = (738, 626, 1730, 1580)
 
-MIN_PIXELS = 150          # กี่พิกเซลถึงจะแจ้งเตือน
+MIN_PIXELS = 0          # กี่พิกเซลถึงจะแจ้งเตือน
 COOLDOWN_SEC = 30 * 60    # แจ้งซ้ำได้ทุกกี่วินาที
 STATE_FILE = "last_alert.json"
 
