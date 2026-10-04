@@ -2,7 +2,7 @@ name: TMD Radar Auto Alert
 
 on:
   schedule:
-    - cron: '*/21 * * * *'
+    - cron: '*/20 * * * *'
   workflow_dispatch:
 
 jobs:
